@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动图标统一蓝色背景（XML adaptive 与 PNG 共用） -->
+    <color name="ic_launcher_background">#5B8FBF</color>
+    <!-- 圆环：白环，在蓝底上对比清晰 -->
+    <color name="ic_launcher_ring">#FFFFFF</color>
+</resources>

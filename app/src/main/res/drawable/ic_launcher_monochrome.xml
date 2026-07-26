@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?><!-- Android 13+ 主题图标：单色圆环，由系统着色 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#000000"
+        android:fillType="evenOdd"
+        android:pathData="M54,30c-13.255,0 -24,10.745 -24,24s10.745,24 24,24 24,-10.745 24,-24 -10.745,-24 -24,-24zM54,38c8.837,0 16,7.163 16,16s-7.163,16 -16,16 -16,-7.163 -16,-16 7.163,-16 16,-16z" />
+</vector>
