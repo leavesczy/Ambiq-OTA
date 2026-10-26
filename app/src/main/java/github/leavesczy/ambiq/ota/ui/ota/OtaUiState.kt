@@ -10,7 +10,7 @@ data class OtaUiState(
     val firmwarePath: String? = null,
     val firmwareSizeBytes: Long? = null,
     val phase: OtaPhase = OtaPhase.Idle,
-    val progressPercent: Int = 0,
+    val progressPercent: Double = 0.0,
     val statusMessage: String = "",
     val errorDetail: String? = null,
     val isRunning: Boolean = false,
@@ -23,4 +23,8 @@ data class OtaUiState(
 
     val canPickFirmware: Boolean
         get() = !isRunning
+
+    /** 界面展示用整数进度（0–100）。 */
+    val progressPercentDisplay: Int
+        get() = progressPercent.toInt().coerceIn(minimumValue = 0, maximumValue = 100)
 }

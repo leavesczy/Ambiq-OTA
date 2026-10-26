@@ -1,8 +1,5 @@
-# Keep default ProGuard rules.
--optimizationpasses 20
--renamesourcefileattribute ''
+-repackageclasses
+-allowaccessmodification
 -dontusemixedcaseclassnames
--processkotlinnullchecks remove
--obfuscationdictionary dictionary.txt
--classobfuscationdictionary dictionary.txt
--packageobfuscationdictionary dictionary.txt
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

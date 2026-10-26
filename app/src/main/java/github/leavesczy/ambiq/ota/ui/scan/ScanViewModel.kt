@@ -20,7 +20,9 @@ class ScanViewModel(
 
     private val _uiState = MutableStateFlow(
         ScanUiState(
-            hasPermission = BluetoothPermissionHelper.hasBluetoothPermissions(application)
+            hasPermission = BluetoothPermissionHelper.hasBluetoothPermissions(
+                context = application
+            )
         )
     )
     val uiState: StateFlow<ScanUiState> = _uiState.asStateFlow()
@@ -78,11 +80,11 @@ class ScanViewModel(
 
     fun startScan() {
         val context = getApplication<Application>()
-        if (!BluetoothPermissionHelper.hasBluetoothPermissions(context)) {
+        if (!BluetoothPermissionHelper.hasBluetoothPermissions(context = context)) {
             _uiState.update { it.copy(hasPermission = false) }
             return
         }
-        if (!BluetoothPermissionHelper.isBluetoothEnabled(context)) {
+        if (!BluetoothPermissionHelper.isBluetoothEnabled(context = context)) {
             return
         }
         deviceMap.clear()
@@ -114,13 +116,13 @@ class ScanViewModel(
     }
 
     fun needsPermissionRequest(): Boolean {
-        return !BluetoothPermissionHelper.hasBluetoothPermissions(getApplication())
+        return !BluetoothPermissionHelper.hasBluetoothPermissions(context = getApplication())
     }
 
     fun needsBluetoothEnable(): Boolean {
         val context = getApplication<Application>()
-        return BluetoothPermissionHelper.hasBluetoothPermissions(context) &&
-                !BluetoothPermissionHelper.isBluetoothEnabled(context)
+        return BluetoothPermissionHelper.hasBluetoothPermissions(context = context) &&
+                !BluetoothPermissionHelper.isBluetoothEnabled(context = context)
     }
 
     override fun onCleared() {

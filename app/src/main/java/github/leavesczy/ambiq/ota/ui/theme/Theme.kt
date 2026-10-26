@@ -22,19 +22,19 @@ import androidx.compose.ui.unit.sp
  * 淡蓝色主调：主色与页面背景均为浅蓝系。
  */
 object AppColors {
-    val Brand = Color(0xFF5B9BD4)
-    val BrandSoft = Color(0xFF7EB0DC)
-    val Canvas = Color(0xFFE8F2FA)
-    val Success = Color(0xFF2F8F72)
-    val Muted = Color(0xFF5E7A94)
-    val Shadow = Color(0xFF1A3350)
-    val AtmosphereTop = Color(0xFFD6E8F6)
-    val AtmosphereBottom = Color(0xFFF0F7FC)
-    val SurfaceLowest = Color(0xFFF7FBFF)
-    val SurfaceLow = Color(0xFFF0F6FC)
-    val Surface = Color(0xFFE4EDF6)
-    val SurfaceHigh = Color(0xFFD9E6F2)
-    val SurfaceHighest = Color(0xFFCDDCEB)
+    val Brand = Color(color = 0xFF5B9BD4)
+    val BrandSoft = Color(color = 0xFF7EB0DC)
+    val Canvas = Color(color = 0xFFE8F2FA)
+    val Success = Color(color = 0xFF2F8F72)
+    val Muted = Color(color = 0xFF5E7A94)
+    val Shadow = Color(color = 0xFF1A3350)
+    val AtmosphereTop = Color(color = 0xFFD6E8F6)
+    val AtmosphereBottom = Color(color = 0xFFF0F7FC)
+    val SurfaceLowest = Color(color = 0xFFF7FBFF)
+    val SurfaceLow = Color(color = 0xFFF0F6FC)
+    val Surface = Color(color = 0xFFE4EDF6)
+    val SurfaceHigh = Color(color = 0xFFD9E6F2)
+    val SurfaceHighest = Color(color = 0xFFCDDCEB)
 }
 
 object AppDimens {
@@ -62,34 +62,34 @@ val AppPageAtmosphereBrush = Brush.verticalGradient(
     )
 )
 
-val CardShape = RoundedCornerShape(AppDimens.RadiusLg)
-val ButtonShape = RoundedCornerShape(AppDimens.RadiusMd)
+val CardShape = RoundedCornerShape(size = AppDimens.RadiusLg)
+val ButtonShape = RoundedCornerShape(size = AppDimens.RadiusMd)
 
 private val AppColorScheme: ColorScheme = lightColorScheme(
     primary = AppColors.Brand,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFD4E8F8),
-    onPrimaryContainer = Color(0xFF12324F),
-    secondary = Color(0xFF5B8ABC),
+    primaryContainer = Color(color = 0xFFD4E8F8),
+    onPrimaryContainer = Color(color = 0xFF12324F),
+    secondary = Color(color = 0xFF5B8ABC),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFD9E6F2),
-    onSecondaryContainer = Color(0xFF16324A),
+    secondaryContainer = Color(color = 0xFFD9E6F2),
+    onSecondaryContainer = Color(color = 0xFF16324A),
     tertiary = AppColors.Success,
     onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFD4F0E6),
-    onTertiaryContainer = Color(0xFF0D3B2E),
-    error = Color(0xFFB42318),
+    tertiaryContainer = Color(color = 0xFFD4F0E6),
+    onTertiaryContainer = Color(color = 0xFF0D3B2E),
+    error = Color(color = 0xFFB42318),
     onError = Color.White,
-    errorContainer = Color(0xFFFEE4E2),
-    onErrorContainer = Color(0xFF7A271A),
+    errorContainer = Color(color = 0xFFFEE4E2),
+    onErrorContainer = Color(color = 0xFF7A271A),
     background = AppColors.Canvas,
-    onBackground = Color(0xFF15283C),
+    onBackground = Color(color = 0xFF15283C),
     surface = AppColors.Canvas,
-    onSurface = Color(0xFF15283C),
+    onSurface = Color(color = 0xFF15283C),
     surfaceVariant = AppColors.SurfaceHighest,
     onSurfaceVariant = AppColors.Muted,
-    outline = Color(0xFF7A8FA3),
-    outlineVariant = Color(0xFFB8C9D9),
+    outline = Color(color = 0xFF7A8FA3),
+    outlineVariant = Color(color = 0xFFB8C9D9),
     surfaceContainerLowest = AppColors.SurfaceLowest,
     surfaceContainerLow = AppColors.SurfaceLow,
     surfaceContainer = AppColors.Surface,
@@ -174,7 +174,7 @@ fun AtmosphereScaffold(content: @Composable BoxScope.() -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppPageAtmosphereBrush),
+            .background(brush = AppPageAtmosphereBrush),
         content = content
     )
 }

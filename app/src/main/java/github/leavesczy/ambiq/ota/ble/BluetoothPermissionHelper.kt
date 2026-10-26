@@ -23,8 +23,10 @@ object BluetoothPermissionHelper {
 
     fun hasBluetoothPermissions(context: Context): Boolean {
         return requiredPermissions().all { permission ->
-            ContextCompat.checkSelfPermission(context, permission) ==
-                    PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                context,
+                permission
+            ) == PackageManager.PERMISSION_GRANTED
         }
     }
 

@@ -34,7 +34,7 @@ fun OtaPhase.accentColor(scheme: ColorScheme): Color {
 }
 
 fun formatElapsed(ms: Long): String {
-    val totalSec = (ms / 1000).toInt().coerceAtLeast(0)
+    val totalSec = (ms / 1000).toInt().coerceAtLeast(minimumValue = 0)
     val hours = totalSec / 3600
     val minutes = (totalSec % 3600) / 60
     val seconds = totalSec % 60

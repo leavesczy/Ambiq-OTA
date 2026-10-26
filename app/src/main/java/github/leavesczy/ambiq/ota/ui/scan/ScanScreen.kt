@@ -131,12 +131,14 @@ fun ScanScreen(
             ) {
                 SectionCard(
                     title = if (uiState.isScanning) "正在扫描" else "蓝牙扫描",
-                    modifier = Modifier.padding(horizontal = AppDimens.PagePadding)
+                    modifier = Modifier
+                        .padding(horizontal = AppDimens.PagePadding)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(space = 12.dp)
                     ) {
                         Text(
                             text = if (uiState.isScanning) {
@@ -146,11 +148,13 @@ fun ScanScreen(
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = scheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(weight = 1f)
                         )
                         if (uiState.isScanning) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier
+                                    .size(size = 18.dp),
                                 strokeWidth = 2.dp,
                                 color = scheme.primary
                             )
@@ -168,7 +172,10 @@ fun ScanScreen(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(AppDimens.SectionGap))
+                Spacer(
+                    modifier = Modifier
+                        .height(height = AppDimens.SectionGap)
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -193,7 +200,10 @@ fun ScanScreen(
                             StatusChip(label = "扫描失败", color = scheme.error)
                     }
                 }
-                Spacer(modifier = Modifier.height(AppDimens.CardInnerGap))
+                Spacer(
+                    modifier = Modifier
+                        .height(height = AppDimens.CardInnerGap)
+                )
                 if (uiState.devices.isEmpty()) {
                     EmptyState(
                         message = when {
@@ -206,17 +216,19 @@ fun ScanScreen(
                         } else {
                             Icons.AutoMirrored.Outlined.BluetoothSearching
                         },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(weight = 1f)
                     )
                 } else {
                     LazyColumn(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(weight = 1f),
                         contentPadding = PaddingValues(
                             start = AppDimens.PagePadding,
                             end = AppDimens.PagePadding,
                             bottom = AppDimens.PagePadding
                         ),
-                        verticalArrangement = Arrangement.spacedBy(AppDimens.ListItemGap)
+                        verticalArrangement = Arrangement.spacedBy(space = AppDimens.ListItemGap)
                     ) {
                         items(
                             items = uiState.devices,

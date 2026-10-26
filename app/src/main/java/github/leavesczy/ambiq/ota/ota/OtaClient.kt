@@ -15,7 +15,6 @@ import github.leavesczy.ambiq.ota.util.appLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.InputStream
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -23,20 +22,33 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * AMOTA OTA 入口：独立 GATT 会话。
+ * AMOTA OTA 对外入口（独立 GATT 会话）。
  *
- * 1. [setListener] 注册进度回调
- * 2. [startOta] 连接设备并完成 HEADER → DATA → VERIFY → RESET
- * 3. [cancelOta] / [close] 取消或释放资源
+ * ## 外部用法
+ * 1. [setListener] 注册 [OtaClientListener]
+ * 2. 扫描并选出设备地址与 packed AMOTA 固件（前 48 字节为头）
+ * 3. [startOta]：内部自动 connectGatt → GATT 准备 → 协议升级；
+ *    进度走 [OtaClientListener.onProgress]，可通过返回值获知成败与错误
+ *
+ * 外部无需关心 connectGatt / 连接状态。
  */
 @SuppressLint("MissingPermission")
 class OtaClient(private val context: Context) {
 
     private companion object {
         private const val DEFAULT_PAYLOAD = 20
-        private const val REQUESTED_MTU = 247
-        private const val MAX_ATT_PAYLOAD = 237
-        private const val WRITE_TIMEOUT_MS = 3000L
+
+        /** Android [BluetoothGatt.requestMtu] 上限；实际以外设协商结果为准。 */
+        private const val REQUESTED_MTU = 517
+
+        /** 相对 `mtu - 3` 预留字节，降低部分机型写满协商值时失败的概率。 */
+        private const val ATT_PAYLOAD_MARGIN = 4
+
+        /**
+         * 等待 [onCharacteristicWrite] 的上限。
+         * NO_RESPONSE 大批量传输时部分机型回调会变慢；3s 偏紧易偶发超时，15s 又过长，取 8s 折中。
+         */
+        private const val WRITE_TIMEOUT_MS = 8_000L
         private const val CONNECT_TIMEOUT_MS = 30_000L
     }
 
@@ -83,9 +95,27 @@ class OtaClient(private val context: Context) {
 
     private val lastTransportError = AtomicReference<OtaError?>(null)
 
+    /** 分片写时复用；长度随本会话 MTU 帧长变化，避免每帧 copyOfRange。 */
+    private var txFrameScratch = ByteArray(size = 0)
+
+    private var lastLoggedProgressPercent = -1
+
     private val transport = object : OtaTransport {
-        override fun write(data: ByteArray): Boolean {
-            return writeRx(data = data)
+        override fun write(data: ByteArray, offset: Int, length: Int): Boolean {
+            if (offset < 0 || length < 0 || offset + length > data.size) {
+                lastTransportError.set(OtaError.GattWriteStartFailed)
+                return false
+            }
+            val payload = if (offset == 0 && length == data.size) {
+                data
+            } else {
+                if (txFrameScratch.size != length) {
+                    txFrameScratch = ByteArray(size = length)
+                }
+                System.arraycopy(data, offset, txFrameScratch, 0, length)
+                txFrameScratch
+            }
+            return writeRx(data = payload)
         }
 
         override fun maxPayloadSize(): Int {
@@ -96,6 +126,120 @@ class OtaClient(private val context: Context) {
             return lastTransportError.getAndSet(null)
         }
     }
+
+    /**
+     * 注册事件监听。传 null 解除注册。
+     * 注册时立刻回放当前进度。
+     */
+    fun setListener(listener: OtaClientListener?) {
+        listenerRef.set(listener)
+        listener?.onProgress(progress = progressRef.get())
+    }
+
+    /**
+     * 开始 OTA：内部自动连接并完成 GATT 准备后执行协议升级。
+     * [firmwareFile] 须为 packed AMOTA 固件（含 48 字节头）。
+     */
+    suspend fun startOta(macAddress: String, firmwareFile: File): OtaResult {
+        return runOtaSession(macAddress = macAddress) {
+            updater.start(firmwareFile = firmwareFile, transport = transport)
+        }
+    }
+
+    /**
+     * 请求取消正在进行的升级；同时结束连接准备等待并断开 GATT。
+     */
+    fun cancelOta() {
+        updater.cancel()
+        if (isWaitingForReady.get()) {
+            failSetup(error = OtaError.Cancelled)
+        }
+        disconnectInternal()
+    }
+
+    /** 立刻释放资源；会取消进行中的 OTA，并清空监听。 */
+    fun close() {
+        updater.cancel()
+        isWaitingForReady.set(false)
+        listenerRef.set(null)
+        closeGatt()
+        connectionStateRef.set(OtaConnectionState.Disconnected)
+        isOtaRunning.set(false)
+    }
+
+    private suspend fun runOtaSession(
+        macAddress: String,
+        upgrade: suspend () -> OtaResult
+    ): OtaResult {
+        if (!isOtaRunning.compareAndSet(false, true)) {
+            val error = OtaError.OtaInProgress
+            markFailed(error = error)
+            return OtaResult.Failed(error = error)
+        }
+        return try {
+            emitProgress(OtaProgress(phase = OtaPhase.Preparing, percent = 0.0))
+            val setupError = connectAndWaitReady(macAddress = macAddress)
+            if (setupError != null) {
+                if (setupError is OtaError.Cancelled) {
+                    progressRef.set(OtaProgress(phase = OtaPhase.Cancelled, percent = 0.0))
+                    return OtaResult.Cancelled
+                }
+                markFailed(error = setupError)
+                return OtaResult.Failed(error = setupError)
+            }
+            upgrade()
+        } finally {
+            // 协议层进度（含 100%）已在 upgrade() 内同步发出；GATT 在此拆除。
+            // 长生命周期客户端保留 listener，由 [close] 或调用方显式清空。
+            disconnectInternal()
+            closeGatt()
+            connectionStateRef.set(OtaConnectionState.Disconnected)
+            isOtaRunning.set(false)
+        }
+    }
+
+    private suspend fun connectAndWaitReady(macAddress: String): OtaError? =
+        withContext(context = Dispatchers.IO) {
+            val device = try {
+                bluetoothAdapter?.getRemoteDevice(macAddress)
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+            if (device == null) {
+                return@withContext OtaError.DeviceNotFound(macAddress = macAddress)
+            }
+            closeGatt()
+            writeSemaphore = Semaphore(0)
+            readySemaphore = Semaphore(0)
+            setupErrorRef.set(null)
+            resetSetupFlags()
+            isWaitingForReady.set(true)
+            connectionStateRef.set(OtaConnectionState.Connecting)
+            appLog {
+                "正在连接设备: $macAddress"
+            }
+            gatt = device.connectGatt(
+                context,
+                false,
+                gattCallback,
+                BluetoothDevice.TRANSPORT_LE
+            )
+            if (gatt == null) {
+                isWaitingForReady.set(false)
+                return@withContext OtaError.ConnectFailed(detail = "connectGatt returned null")
+            }
+            val acquired = readySemaphore.tryAcquire(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            isWaitingForReady.set(false)
+            if (!acquired) {
+                disconnectInternal()
+                return@withContext OtaError.ConnectTimeout
+            }
+            if (connectionStateRef.get() == OtaConnectionState.Ready) {
+                null
+            } else {
+                setupErrorRef.get() ?: OtaError.ConnectFailed(detail = null)
+            }
+        }
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
@@ -136,14 +280,10 @@ class OtaClient(private val context: Context) {
 
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS && mtu > 3) {
-                val payload = if (mtu - 3 >= MAX_ATT_PAYLOAD) {
-                    MAX_ATT_PAYLOAD
-                } else {
-                    mtu - 3
-                }
+                val payload = (mtu - 3 - ATT_PAYLOAD_MARGIN).coerceAtLeast(minimumValue = 1)
                 attPayloadSize.set(payload)
                 appLog {
-                    "MTU 协商成功: mtu=$mtu, payload=$payload"
+                    "MTU 协商成功: mtu=$mtu, payload=$payload (margin=$ATT_PAYLOAD_MARGIN)"
                 }
             }
             // 系统可能在连接后提前回调 onMtuChanged；仅在通知已开启并主动 requestMtu 之后才 ready。
@@ -239,219 +379,6 @@ class OtaClient(private val context: Context) {
         }
     }
 
-    /**
-     * 注册事件监听。传 null 解除注册。
-     * 注册时立刻回放当前进度。
-     */
-    fun setListener(listener: OtaClientListener?) {
-        listenerRef.set(listener)
-        listener?.onProgress(progress = progressRef.get())
-    }
-
-    /**
-     * 开始 OTA：内部自动连接并完成 GATT 准备后执行协议升级。
-     * [firmwareFile] 须为 packed AMOTA 固件（含 48 字节头）。
-     */
-    suspend fun startOta(macAddress: String, firmwareFile: File): OtaResult {
-        return runOtaSession(macAddress = macAddress) {
-            updater.start(firmwareFile = firmwareFile, transport = transport)
-        }
-    }
-
-    /**
-     * 与文件重载相同；由调用方负责 [firmwareStream] 的生命周期（本方法不会关闭流）。
-     */
-    suspend fun startOta(macAddress: String, firmwareStream: InputStream): OtaResult {
-        return runOtaSession(macAddress = macAddress) {
-            updater.start(firmwareStream = firmwareStream, transport = transport)
-        }
-    }
-
-    /**
-     * 请求取消正在进行的升级；同时结束连接准备等待并断开 GATT。
-     */
-    fun cancelOta() {
-        updater.cancel()
-        if (isWaitingForReady.get()) {
-            failSetup(error = OtaError.Cancelled)
-        }
-        disconnectInternal()
-    }
-
-    /** 立刻释放资源；会取消进行中的 OTA。 */
-    fun close() {
-        updater.cancel()
-        isWaitingForReady.set(false)
-        closeGatt()
-        connectionStateRef.set(OtaConnectionState.Disconnected)
-        isOtaRunning.set(false)
-    }
-
-    private suspend fun runOtaSession(
-        macAddress: String,
-        upgrade: suspend () -> OtaResult
-    ): OtaResult {
-        if (!isOtaRunning.compareAndSet(false, true)) {
-            val error = OtaError.OtaInProgress
-            emitFailed(error = error)
-            return OtaResult.Failed(error = error)
-        }
-        return try {
-            emitProgress(OtaProgress(phase = OtaPhase.Preparing, percent = 0))
-            val setupError = connectAndWaitReady(macAddress = macAddress)
-            if (setupError != null) {
-                if (setupError is OtaError.Cancelled) {
-                    emitProgress(
-                        OtaProgress(
-                            phase = OtaPhase.Cancelled,
-                            percent = 0,
-                            error = setupError
-                        )
-                    )
-                    return OtaResult.Cancelled
-                }
-                emitFailed(error = setupError)
-                return OtaResult.Failed(error = setupError)
-            }
-            upgrade()
-        } finally {
-            disconnectInternal()
-            closeGatt()
-            connectionStateRef.set(OtaConnectionState.Disconnected)
-            isOtaRunning.set(false)
-        }
-    }
-
-    private suspend fun connectAndWaitReady(macAddress: String): OtaError? =
-        withContext(Dispatchers.IO) {
-            val device = try {
-                bluetoothAdapter?.getRemoteDevice(macAddress)
-            } catch (_: IllegalArgumentException) {
-                null
-            }
-            if (device == null) {
-                return@withContext OtaError.DeviceNotFound(macAddress = macAddress)
-            }
-            closeGatt()
-            writeSemaphore = Semaphore(0)
-            readySemaphore = Semaphore(0)
-            setupErrorRef.set(null)
-            resetSetupFlags()
-            isWaitingForReady.set(true)
-            connectionStateRef.set(OtaConnectionState.Connecting)
-            appLog {
-                "正在连接设备: $macAddress"
-            }
-            gatt = device.connectGatt(
-                context,
-                false,
-                gattCallback,
-                BluetoothDevice.TRANSPORT_LE
-            )
-            if (gatt == null) {
-                isWaitingForReady.set(false)
-                return@withContext OtaError.ConnectFailed(detail = "connectGatt returned null")
-            }
-            val acquired = readySemaphore.tryAcquire(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            isWaitingForReady.set(false)
-            if (!acquired) {
-                disconnectInternal()
-                return@withContext OtaError.ConnectTimeout
-            }
-            if (connectionStateRef.get() == OtaConnectionState.Ready) {
-                null
-            } else {
-                setupErrorRef.get() ?: OtaError.ConnectFailed(detail = null)
-            }
-        }
-
-    private fun writeRx(data: ByteArray): Boolean {
-        val characteristic = rxCharacteristic
-        val bluetoothGatt = gatt
-        if (characteristic == null || bluetoothGatt == null) {
-            lastTransportError.set(OtaError.TransportUnavailable)
-            return false
-        }
-        while (writeSemaphore.tryAcquire()) {
-            // discard
-        }
-        lastWriteStatus = BluetoothGatt.GATT_FAILURE
-        val started = writeCharacteristicCompat(
-            gatt = bluetoothGatt,
-            characteristic = characteristic,
-            data = data
-        )
-        if (!started) {
-            lastTransportError.set(OtaError.GattWriteStartFailed)
-            return false
-        }
-        val ok = writeSemaphore.tryAcquire(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        if (!ok) {
-            lastTransportError.set(OtaError.GattWriteTimeout)
-            return false
-        }
-        val success = lastWriteStatus == BluetoothGatt.GATT_SUCCESS
-        if (!success) {
-            lastTransportError.set(
-                OtaError.GattWriteFailed(detail = "status=$lastWriteStatus")
-            )
-        }
-        return success
-    }
-
-    private fun emitProgress(progress: OtaProgress) {
-        progressRef.set(progress)
-        val listener = listenerRef.get() ?: return
-        appLog {
-            "emitProgress: $progress"
-        }
-        listener.onProgress(progress = progress)
-        progress.error?.let { error ->
-            listener.onError(error = error)
-        }
-    }
-
-    private fun emitFailed(error: OtaError) {
-        emitProgress(
-            OtaProgress(
-                phase = OtaPhase.Failed,
-                percent = progressRef.get().percent,
-                error = error
-            )
-        )
-    }
-
-    private fun failSetup(error: OtaError) {
-        appLog {
-            error.message
-        }
-        if (isWaitingForReady.compareAndSet(true, false)) {
-            setupErrorRef.set(error)
-            readySemaphore.release()
-        }
-    }
-
-    private fun disconnectInternal() {
-        connectionStateRef.set(OtaConnectionState.Disconnecting)
-        gatt?.disconnect()
-    }
-
-    private fun resetSetupFlags() {
-        attPayloadSize.set(DEFAULT_PAYLOAD)
-        isServicesDiscoveryStarted.set(false)
-        isNotificationSetupStarted.set(false)
-        isMtuRequestStarted.set(false)
-        isReadyMarked.set(false)
-    }
-
-    private fun closeGatt() {
-        gatt?.close()
-        gatt = null
-        rxCharacteristic = null
-        txCharacteristic = null
-        resetSetupFlags()
-    }
-
     private fun startServiceDiscovery(gatt: BluetoothGatt) {
         if (!isServicesDiscoveryStarted.compareAndSet(false, true)) {
             appLog {
@@ -467,6 +394,28 @@ class OtaClient(private val context: Context) {
             failSetup(
                 error = OtaError.ServiceDiscoverFailed(detail = "discoverServices=false")
             )
+        }
+    }
+
+    private fun enableTxNotification(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic
+    ) {
+        gatt.setCharacteristicNotification(characteristic, true)
+        val descriptor = characteristic.getDescriptor(OtaUuids.CCCD)
+        if (descriptor == null) {
+            isNotificationSetupStarted.set(false)
+            failSetup(error = OtaError.CccdMissing)
+            return
+        }
+        val ok = writeDescriptorCompat(
+            gatt = gatt,
+            descriptor = descriptor,
+            value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        )
+        if (!ok) {
+            isNotificationSetupStarted.set(false)
+            failSetup(error = OtaError.CccdWriteFailed)
         }
     }
 
@@ -500,26 +449,42 @@ class OtaClient(private val context: Context) {
         }
     }
 
-    private fun enableTxNotification(
-        gatt: BluetoothGatt,
-        characteristic: BluetoothGattCharacteristic
-    ) {
-        gatt.setCharacteristicNotification(characteristic, true)
-        val descriptor = characteristic.getDescriptor(OtaUuids.CCCD)
-        if (descriptor == null) {
-            isNotificationSetupStarted.set(false)
-            failSetup(error = OtaError.CccdMissing)
-            return
+    private fun writeRx(data: ByteArray): Boolean {
+        val characteristic = rxCharacteristic
+        val bluetoothGatt = gatt
+        if (characteristic == null || bluetoothGatt == null) {
+            lastTransportError.set(OtaError.TransportUnavailable)
+            return false
         }
-        val ok = writeDescriptorCompat(
-            gatt = gatt,
-            descriptor = descriptor,
-            value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        while (writeSemaphore.tryAcquire()) {
+            // discard
+        }
+        lastWriteStatus = BluetoothGatt.GATT_FAILURE
+        val started = writeCharacteristicCompat(
+            gatt = bluetoothGatt,
+            characteristic = characteristic,
+            data = data
         )
-        if (!ok) {
-            isNotificationSetupStarted.set(false)
-            failSetup(error = OtaError.CccdWriteFailed)
+        if (!started) {
+            lastTransportError.set(OtaError.GattWriteStartFailed)
+            return false
         }
+        val ok = writeSemaphore.tryAcquire(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        if (!ok) {
+            appLog {
+                "OTA GATT 写等待超时 timeoutMs=$WRITE_TIMEOUT_MS " +
+                        "state=${connectionStateRef.get()} payload=${data.size}"
+            }
+            lastTransportError.set(OtaError.GattWriteTimeout)
+            return false
+        }
+        val success = lastWriteStatus == BluetoothGatt.GATT_SUCCESS
+        if (!success) {
+            lastTransportError.set(
+                OtaError.GattWriteFailed(detail = "status=$lastWriteStatus")
+            )
+        }
+        return success
     }
 
     private fun writeCharacteristicCompat(
@@ -551,6 +516,66 @@ class OtaClient(private val context: Context) {
             descriptor.value = value
             gatt.writeDescriptor(descriptor)
         }
+    }
+
+    private fun emitProgress(progress: OtaProgress) {
+        progressRef.set(progress)
+        val listener = listenerRef.get() ?: return
+        val percentBucket = progress.percent.toInt()
+        if (percentBucket != lastLoggedProgressPercent ||
+            progress.phase == OtaPhase.Failed ||
+            progress.phase == OtaPhase.Cancelled ||
+            progress.phase == OtaPhase.Success
+        ) {
+            lastLoggedProgressPercent = percentBucket
+            appLog {
+                "emitProgress: $progress"
+            }
+        }
+        listener.onProgress(progress = progress)
+    }
+
+    private fun markFailed(error: OtaError) {
+        appLog {
+            "OTA failed before/during session: ${error.logText()} (percent=${progressRef.get().percent})"
+        }
+        progressRef.set(
+            OtaProgress(
+                phase = OtaPhase.Failed,
+                percent = progressRef.get().percent
+            )
+        )
+    }
+
+    private fun failSetup(error: OtaError) {
+        appLog {
+            error.logText()
+        }
+        if (isWaitingForReady.compareAndSet(true, false)) {
+            setupErrorRef.set(error)
+            readySemaphore.release()
+        }
+    }
+
+    private fun disconnectInternal() {
+        connectionStateRef.set(OtaConnectionState.Disconnecting)
+        gatt?.disconnect()
+    }
+
+    private fun closeGatt() {
+        gatt?.close()
+        gatt = null
+        rxCharacteristic = null
+        txCharacteristic = null
+        resetSetupFlags()
+    }
+
+    private fun resetSetupFlags() {
+        attPayloadSize.set(DEFAULT_PAYLOAD)
+        isServicesDiscoveryStarted.set(false)
+        isNotificationSetupStarted.set(false)
+        isMtuRequestStarted.set(false)
+        isReadyMarked.set(false)
     }
 
 }

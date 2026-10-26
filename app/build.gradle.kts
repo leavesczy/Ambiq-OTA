@@ -29,7 +29,7 @@ android {
     signingConfigs {
         create("release") {
             storeFile = File(rootDir, "doc/key.jks")
-            keyAlias = "leavesCZY"
+            keyAlias = "leavesczy"
             keyPassword = "123456"
             storePassword = "123456"
             enableV1Signing = true

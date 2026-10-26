@@ -43,13 +43,15 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
         private const val VERIFY_TIMEOUT_MS = 5000L
 
         /** 数据传输阶段进度上限；Verifying=96 / Resetting=98 / Success=100。 */
-        private const val DATA_PERCENT_MAX = 94
+        private const val DATA_PERCENT_MAX = 94.0
 
-        private const val VERIFY_PERCENT = 96
+        private const val VERIFY_PERCENT = 96.0
 
-        private const val RESET_PERCENT = 98
+        private const val RESET_PERCENT = 98.0
 
-        private const val SUCCESS_PERCENT = 100
+        private const val SUCCESS_PERCENT = 100.0
+
+        private const val PROGRESS_EPSILON = 0.001
 
         private fun toHex(data: ByteArray): String =
             data.joinToString(separator = " ") { String.format("%02X", it) }
@@ -74,6 +76,25 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
     private var transport: OtaTransport? = null
 
     private var progress = OtaProgress()
+
+    /** 固件 DATA 读缓冲（每会话复用）。 */
+    private val firmwareReadBuffer = ByteArray(size = FIRMWARE_PACKET_SIZE)
+
+    /** AMOTA 整包组装缓冲：header(3) + data(≤512) + crc(4)。 */
+    private val packetBuffer = ByteArray(size = HEADER_SIZE + FIRMWARE_PACKET_SIZE + CRC_SIZE)
+
+    suspend fun start(
+        firmwareFile: File,
+        transport: OtaTransport
+    ): OtaResult = withContext(context = Dispatchers.IO) {
+        FileInputStream(firmwareFile).use { input ->
+            startInternal(input = input, transport = transport)
+        }
+    }
+
+    fun cancel() {
+        isStopRequested = true
+    }
 
     /**
      * 处理 TX Notify 数据。
@@ -136,29 +157,6 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
         }
     }
 
-    fun cancel() {
-        isStopRequested = true
-    }
-
-    suspend fun start(
-        firmwareFile: File,
-        transport: OtaTransport
-    ): OtaResult = withContext(Dispatchers.IO) {
-        FileInputStream(firmwareFile).use { input ->
-            startInternal(input = input, transport = transport)
-        }
-    }
-
-    suspend fun start(
-        firmwareStream: InputStream,
-        transport: OtaTransport
-    ): OtaResult = withContext(Dispatchers.IO) {
-        startInternal(
-            input = firmwareStream,
-            transport = transport
-        )
-    }
-
     private fun startInternal(
         input: InputStream,
         transport: OtaTransport
@@ -170,71 +168,46 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
         isLastCommandOk.set(false)
         pendingError.set(null)
         drain(semaphore = cmdResponseSemaphore)
-        update(phase = OtaPhase.Idle, percent = 0)
+        update(phase = OtaPhase.Idle, percent = 0.0)
         return try {
             if (input.available() == 0) {
                 return failResult(error = OtaError.FirmwareEmpty(detail = null))
             }
-            update(phase = OtaPhase.SendingHeader, percent = 0)
+            update(phase = OtaPhase.SendingHeader, percent = 0.0)
             appLog {
                 "开始发送固件头"
             }
             if (!sendFirmwareHeader(input = input)) {
-                return failResult(
-                    error = pendingError.get()
-                        ?: OtaError.SendHeaderFailed
+                return cancelledOrFailed(
+                    fallback = pendingError.get() ?: OtaError.SendHeaderFailed
                 )
             }
             if (fileOffset > 0) {
                 if (!skipFully(input = input, bytes = fileOffset.toLong())) {
-                    return failResult(
-                        error = OtaError.ResumeOffsetFailed(detail = "offset=$fileOffset")
+                    return cancelledOrFailed(
+                        fallback = OtaError.ResumeOffsetFailed(detail = "offset=$fileOffset")
                     )
                 }
                 appLog {
                     "已跳过续传字节=$fileOffset"
                 }
             }
-            update(phase = OtaPhase.SendingData, percent = 0)
+            update(phase = OtaPhase.SendingData, percent = 0.0)
             appLog {
                 "开始传输固件数据，size=$firmwareSize"
             }
             if (!sendFirmwareData(input = input)) {
-                return when {
-                    isStopRequested -> {
-                        val error = OtaError.Cancelled
-                        appLog {
-                            error.message
-                        }
-                        update(
-                            phase = OtaPhase.Cancelled,
-                            percent = progress.percent,
-                            error = error
-                        )
-                        OtaResult.Cancelled
-                    }
-
-                    progress.phase == OtaPhase.Failed ->
-                        OtaResult.Failed(
-                            error = progress.error
-                                ?: pendingError.get()
-                                ?: OtaError.SendDataFailed(detail = null)
-                        )
-
-                    else -> failResult(
-                        error = pendingError.get()
-                            ?: OtaError.SendDataFailed(detail = null)
-                    )
-                }
+                return cancelledOrFailed(
+                    fallback = pendingError.get() ?: OtaError.SendDataFailed(detail = null)
+                )
             }
             update(phase = OtaPhase.Verifying, percent = VERIFY_PERCENT)
             appLog {
                 "开始校验固件"
             }
             if (!sendVerifyCmd()) {
-                return failResult(
-                    error = pendingError.get()
-                        ?: OtaError.VerifyFailed
+                return cancelledOrFailed(
+                    fallback = pendingError.get() ?: OtaError.VerifyFailed
                 )
             }
             update(phase = OtaPhase.Resetting, percent = RESET_PERCENT)
@@ -242,9 +215,8 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
                 "发送复位命令"
             }
             if (!sendResetCmd()) {
-                return failResult(
-                    error = pendingError.get()
-                        ?: OtaError.ResetFailed
+                return cancelledOrFailed(
+                    fallback = pendingError.get() ?: OtaError.ResetFailed
                 )
             }
             update(phase = OtaPhase.Success, percent = SUCCESS_PERCENT)
@@ -263,7 +235,7 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
 
     /** 读 48 字节头、解析固件长度，发送 FW_HEADER 并等待应答（可能带回续传偏移）。 */
     private fun sendFirmwareHeader(input: InputStream): Boolean {
-        val header = ByteArray(FIRMWARE_HEADER_SIZE)
+        val header = ByteArray(size = FIRMWARE_HEADER_SIZE)
         val read = input.read(header)
         if (read < FIRMWARE_HEADER_SIZE) {
             fail(
@@ -296,25 +268,27 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
         while (offset < firmwareSize) {
             if (isStopRequested) return false
             if (progress.phase == OtaPhase.Failed) return false
-            val buffer = ByteArray(FIRMWARE_PACKET_SIZE)
-            val read = input.read(buffer)
+            val read = input.read(firmwareReadBuffer)
             if (read <= 0) {
                 fail(
                     error = OtaError.SendDataFailed(detail = "unexpected EOF offset=$offset")
                 )
                 return false
             }
-            val len = minOf(read, FIRMWARE_PACKET_SIZE)
-            if (!sendOtaCmd(cmd = AmotaOtaCommand.FW_DATA, data = buffer, len = len)) {
+            val len = minOf(a = read, b = FIRMWARE_PACKET_SIZE)
+            if (!sendOtaCmd(cmd = AmotaOtaCommand.FW_DATA, data = firmwareReadBuffer, len = len)) {
                 return false
             }
             if (!waitCmdResponse(timeoutMs = CMD_TIMEOUT_MS)) {
                 return false
             }
             offset += len
-            val percent = ((offset.toLong() * DATA_PERCENT_MAX) / firmwareSize.toLong())
-                .toInt()
-                .coerceIn(0, DATA_PERCENT_MAX)
+            val percent = if (firmwareSize <= 0) {
+                0.0
+            } else {
+                ((offset.toDouble() * DATA_PERCENT_MAX) / firmwareSize.toDouble())
+                    .coerceIn(minimumValue = 0.0, maximumValue = DATA_PERCENT_MAX)
+            }
             update(phase = OtaPhase.SendingData, percent = percent)
         }
         return true
@@ -345,40 +319,38 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
             0
         }
         val packetLength = HEADER_SIZE + len + CRC_SIZE
-        val packet = ByteArray(packetLength)
         val dataPlusCrc = len + CRC_SIZE
-        packet[0] = (dataPlusCrc and 0xFF).toByte()
-        packet[1] = ((dataPlusCrc shr 8) and 0xFF).toByte()
-        packet[2] = cmd.code.toByte()
+        packetBuffer[0] = (dataPlusCrc and 0xFF).toByte()
+        packetBuffer[1] = ((dataPlusCrc shr 8) and 0xFF).toByte()
+        packetBuffer[2] = cmd.code.toByte()
         if (len > 0 && data != null) {
-            System.arraycopy(data, 0, packet, HEADER_SIZE, len)
+            System.arraycopy(data, 0, packetBuffer, HEADER_SIZE, len)
         }
-        packet[HEADER_SIZE + len] = (checksum and 0xFF).toByte()
-        packet[HEADER_SIZE + len + 1] = ((checksum shr 8) and 0xFF).toByte()
-        packet[HEADER_SIZE + len + 2] = ((checksum shr 16) and 0xFF).toByte()
-        packet[HEADER_SIZE + len + 3] = ((checksum shr 24) and 0xFF).toByte()
-        return sendPacket(data = packet)
+        packetBuffer[HEADER_SIZE + len] = (checksum and 0xFF).toByte()
+        packetBuffer[HEADER_SIZE + len + 1] = ((checksum shr 8) and 0xFF).toByte()
+        packetBuffer[HEADER_SIZE + len + 2] = ((checksum shr 16) and 0xFF).toByte()
+        packetBuffer[HEADER_SIZE + len + 3] = ((checksum shr 24) and 0xFF).toByte()
+        return sendPacket(data = packetBuffer, length = packetLength)
     }
 
     /**
      * 把完整 AMOTA 包按 [OtaTransport.maxPayloadSize] 切成多帧写入 BLE。
-     * 例如 519 字节包 + 237 分片 ≈ 3 次 GATT 写。
+     * 例如 519 字节包按当前 payload 分片写入（协商 MTU 越大，写次数越少）。
      */
-    private fun sendPacket(data: ByteArray): Boolean {
+    private fun sendPacket(data: ByteArray, length: Int = data.size): Boolean {
         val writer = transport
         if (writer == null) {
             fail(error = OtaError.TransportUnavailable)
             return false
         }
-        val payloadSize = writer.maxPayloadSize().coerceAtLeast(1)
+        val payloadSize = writer.maxPayloadSize().coerceAtLeast(minimumValue = 1)
         var idx = 0
-        while (idx < data.size) {
+        while (idx < length) {
             if (isStopRequested) {
                 return false
             }
-            val frameLen = minOf(payloadSize, data.size - idx)
-            val frame = data.copyOfRange(fromIndex = idx, toIndex = idx + frameLen)
-            if (!writer.write(data = frame)) {
+            val frameLen = minOf(a = payloadSize, b = length - idx)
+            if (!writer.write(data = data, offset = idx, length = frameLen)) {
                 fail(
                     error = writer.consumeLastWriteError()
                         ?: OtaError.GattWriteFailed(detail = "idx=$idx")
@@ -414,7 +386,7 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
         while (remaining > 0) {
             val skipped = input.skip(remaining)
             if (skipped <= 0) {
-                val buf = ByteArray(minOf(remaining, 4096L).toInt())
+                val buf = ByteArray(size = minOf(a = remaining, b = 4096L).toInt())
                 val read = input.read(buf)
                 if (read <= 0) {
                     return false
@@ -427,35 +399,52 @@ class OtaUpdater(private val onProgress: (OtaProgress) -> Unit) {
         return true
     }
 
-    private fun update(phase: OtaPhase, percent: Int, error: OtaError? = null) {
+    private fun update(phase: OtaPhase, percent: Double) {
         if (progress.phase == phase &&
-            progress.percent == percent &&
-            progress.error == error
+            kotlin.math.abs(x = progress.percent - percent) < PROGRESS_EPSILON
         ) {
             return
         }
-        val value = OtaProgress(phase = phase, percent = percent, error = error)
-        progress = value
-        onProgress(value)
+        val percentChanged = kotlin.math.abs(x = progress.percent - percent) >= PROGRESS_EPSILON
+        progress = OtaProgress(phase = phase, percent = percent)
+        // Failed / Cancelled 只更新内部状态，成败由 OtaResult 外抛，不推进度。
+        if (phase == OtaPhase.Failed || phase == OtaPhase.Cancelled) {
+            return
+        }
+        if (percentChanged) {
+            onProgress(progress)
+        }
     }
 
     private fun fail(error: OtaError) {
         pendingError.set(error)
         appLog {
-            error.message
+            error.logText()
         }
-        update(
-            phase = OtaPhase.Failed,
-            percent = progress.percent,
-            error = error
-        )
+        update(phase = OtaPhase.Failed, percent = progress.percent)
+    }
+
+    /** 用户取消优先于业务失败；各阶段中断统一走此出口。 */
+    private fun cancelledOrFailed(fallback: OtaError): OtaResult {
+        if (isStopRequested) {
+            val error = OtaError.Cancelled
+            appLog {
+                "${error.logText()} (phase=${progress.phase}, percent=${progress.percent})"
+            }
+            update(phase = OtaPhase.Cancelled, percent = progress.percent)
+            return OtaResult.Cancelled
+        }
+        if (progress.phase == OtaPhase.Failed) {
+            return OtaResult.Failed(error = pendingError.get() ?: fallback)
+        }
+        return failResult(error = fallback)
     }
 
     private fun failResult(error: OtaError): OtaResult {
-        if (progress.phase != OtaPhase.Failed || progress.error == null) {
+        if (progress.phase != OtaPhase.Failed || pendingError.get() == null) {
             fail(error = error)
         }
-        return OtaResult.Failed(error = progress.error ?: error)
+        return OtaResult.Failed(error = pendingError.get() ?: error)
     }
 
     private fun drain(semaphore: Semaphore) {

@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -100,7 +101,8 @@ fun OtaScreen(
         label = "phaseColor"
     )
     val animatedProgress by animateFloatAsState(
-        targetValue = uiState.progressPercent / 100f,
+        targetValue = (uiState.progressPercent / 100.0).toFloat()
+            .coerceIn(minimumValue = 0f, maximumValue = 1f),
         label = "progress"
     )
 
@@ -154,7 +156,7 @@ fun OtaScreen(
                         top = 4.dp,
                         bottom = 28.dp
                     ),
-                verticalArrangement = Arrangement.spacedBy(AppDimens.SectionGap)
+                verticalArrangement = Arrangement.spacedBy(space = AppDimens.SectionGap)
             ) {
                 SectionCard(title = "目标设备") {
                     Text(
@@ -162,7 +164,10 @@ fun OtaScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Spacer(modifier = Modifier.height(AppDimens.TextLineGap))
+                    Spacer(
+                        modifier = Modifier
+                            .height(height = AppDimens.TextLineGap)
+                    )
                     Text(
                         text = device.macAddress,
                         style = MaterialTheme.typography.bodySmall.copy(
@@ -171,7 +176,10 @@ fun OtaScreen(
                         color = scheme.onSurfaceVariant
                     )
                     if (uiState.statusMessage.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(AppDimens.CardInnerGap))
+                        Spacer(
+                            modifier = Modifier
+                                .height(height = AppDimens.CardInnerGap)
+                        )
                         StatusChip(
                             label = uiState.statusMessage,
                             color = when {
@@ -197,7 +205,10 @@ fun OtaScreen(
                             scheme.onSurfaceVariant
                         }
                     )
-                    Spacer(modifier = Modifier.height(AppDimens.TextLineGap))
+                    Spacer(
+                        modifier = Modifier
+                            .height(height = AppDimens.TextLineGap)
+                    )
                     Text(
                         text = buildString {
                             append("Ambiq packed 固件（update_binary_*.bin，含 48 字节头）")
@@ -209,7 +220,10 @@ fun OtaScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = scheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(AppDimens.CardInnerGap))
+                    Spacer(
+                        modifier = Modifier
+                            .height(height = AppDimens.CardInnerGap)
+                    )
                     SecondaryActionButton(
                         label = if (uiState.firmwareName == null) "选择固件" else "重新选择",
                         onClick = {
@@ -222,50 +236,65 @@ fun OtaScreen(
                 }
                 SectionCard(title = "升级进度") {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth(),
                         verticalAlignment = Alignment.Bottom
                     ) {
                         Text(
                             text = uiState.phase.displayLabel,
                             style = MaterialTheme.typography.titleMedium,
                             color = phaseColor,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(weight = 1f)
                         )
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                text = "${uiState.progressPercent}%",
+                                text = "${uiState.progressPercentDisplay}%",
                                 style = MaterialTheme.typography.headlineSmall,
                                 color = phaseColor
                             )
                             if (uiState.isRunning || uiState.elapsedMs > 0) {
                                 Text(
-                                    text = "耗时 ${formatElapsed(uiState.elapsedMs)}",
+                                    text = "耗时 ${formatElapsed(ms = uiState.elapsedMs)}",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = scheme.onSurfaceVariant
                                 )
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(AppDimens.CardInnerGap))
+                    Spacer(
+                        modifier = Modifier
+                            .height(height = AppDimens.CardInnerGap)
+                    )
                     LinearProgressIndicator(
                         progress = { animatedProgress },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(AppDimens.ProgressHeight)
-                            .clip(RoundedCornerShape(AppDimens.RadiusSm)),
+                            .height(height = AppDimens.ProgressHeight)
+                            .clip(shape = RoundedCornerShape(size = AppDimens.RadiusSm)),
                         color = phaseColor,
-                        trackColor = scheme.surfaceContainerHighest
+                        trackColor = scheme.surfaceContainerHighest,
+                        strokeCap = StrokeCap.Butt,
+                        gapSize = 0.dp,
+                        drawStopIndicator = {}
                     )
                     if (uiState.errorDetail != null) {
-                        Spacer(modifier = Modifier.height(AppDimens.CardInnerGap))
+                        Spacer(
+                            modifier = Modifier
+                                .height(height = AppDimens.CardInnerGap)
+                        )
                         Row(verticalAlignment = Alignment.Top) {
                             Icon(
                                 imageVector = Icons.Outlined.ErrorOutline,
                                 contentDescription = null,
                                 tint = scheme.error,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier
+                                    .size(size = 18.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(
+                                modifier = Modifier
+                                    .width(width = 8.dp)
+                            )
                             Text(
                                 text = uiState.errorDetail!!,
                                 style = MaterialTheme.typography.bodySmall,
@@ -274,15 +303,22 @@ fun OtaScreen(
                         }
                     }
                     if (uiState.isSucceeded) {
-                        Spacer(modifier = Modifier.height(AppDimens.CardInnerGap))
+                        Spacer(
+                            modifier = Modifier
+                                .height(height = AppDimens.CardInnerGap)
+                        )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = Icons.Filled.CheckCircle,
                                 contentDescription = null,
                                 tint = scheme.tertiary,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier
+                                    .size(size = 18.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(
+                                modifier = Modifier
+                                    .width(width = 8.dp)
+                            )
                             Text(
                                 text = "升级成功，设备即将重启",
                                 style = MaterialTheme.typography.bodySmall,

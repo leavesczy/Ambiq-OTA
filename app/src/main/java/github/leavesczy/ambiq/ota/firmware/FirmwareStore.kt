@@ -22,7 +22,10 @@ object FirmwareStore {
     fun cacheFromUri(context: Context, uri: Uri): CachedFirmware {
         val resolver = context.contentResolver
         val displayName = queryDisplayName(context = context, uri = uri) ?: "firmware.bin"
-        val safeName = displayName.replace(Regex("[^\\w.\\-]"), "_")
+        val safeName = displayName.replace(
+            regex = Regex(pattern = "[^\\w.\\-]"),
+            replacement = "_"
+        )
         val cached = File(context.cacheDir, "ota_$safeName")
         val size = resolver.openInputStream(uri)?.use { input ->
             FileOutputStream(cached).use { output ->

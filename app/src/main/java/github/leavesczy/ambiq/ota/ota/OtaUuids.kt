@@ -1,9 +1,5 @@
 package github.leavesczy.ambiq.ota.ota
 
-import github.leavesczy.ambiq.ota.ota.OtaUuids.CCCD
-import github.leavesczy.ambiq.ota.ota.OtaUuids.RX
-import github.leavesczy.ambiq.ota.ota.OtaUuids.SERVICE
-import github.leavesczy.ambiq.ota.ota.OtaUuids.TX
 import java.util.UUID
 
 /**
@@ -18,7 +14,7 @@ object OtaUuids {
 
     val SERVICE: UUID = UUID.fromString("00002760-08c2-11e1-9073-0e8ac72e1001")
 
-    /** Phone → Device；仅使用 Write Without Response */
+    /** Phone → Device；本实现仅使用 Write Without Response */
     val RX: UUID = UUID.fromString("00002760-08c2-11e1-9073-0e8ac72e0001")
 
     /** Device → Phone（Notify） */

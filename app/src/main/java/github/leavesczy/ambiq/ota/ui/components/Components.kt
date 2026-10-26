@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -59,14 +60,14 @@ fun SectionCard(
                 ambientColor = AppColors.Shadow.copy(alpha = 0.04f),
                 spotColor = AppColors.Shadow.copy(alpha = 0.04f)
             )
-            .clip(CardShape)
-            .background(scheme.surfaceContainerLowest)
+            .clip(shape = CardShape)
+            .background(color = scheme.surfaceContainerLowest)
             .border(
                 width = 1.dp,
                 color = scheme.outlineVariant.copy(alpha = 0.7f),
                 shape = CardShape
             )
-            .padding(AppDimens.CardPadding)
+            .padding(all = AppDimens.CardPadding)
     ) {
         Text(
             text = title.uppercase(),
@@ -74,7 +75,10 @@ fun SectionCard(
             color = scheme.onSurfaceVariant,
             fontWeight = FontWeight.SemiBold
         )
-        Spacer(modifier = Modifier.height(AppDimens.CardInnerGap))
+        Spacer(
+            modifier = Modifier
+                .height(height = AppDimens.CardInnerGap)
+        )
         content()
     }
 }
@@ -87,23 +91,26 @@ fun StatusChip(
 ) {
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(AppDimens.RadiusSm))
-            .background(color.copy(alpha = 0.1f))
+            .clip(shape = RoundedCornerShape(size = AppDimens.RadiusSm))
+            .background(color = color.copy(alpha = 0.1f))
             .border(
                 width = 1.dp,
                 color = color.copy(alpha = 0.18f),
-                shape = RoundedCornerShape(AppDimens.RadiusSm)
+                shape = RoundedCornerShape(size = AppDimens.RadiusSm)
             )
             .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(color)
+                .size(size = 6.dp)
+                .clip(shape = CircleShape)
+                .background(color = color)
         )
-        Spacer(modifier = Modifier.width(6.dp))
+        Spacer(
+            modifier = Modifier
+                .width(width = 6.dp)
+        )
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
@@ -127,7 +134,7 @@ fun PrimaryActionButton(
         enabled = enabled && !loading,
         modifier = modifier
             .fillMaxWidth()
-            .height(AppDimens.ButtonHeight),
+            .height(height = AppDimens.ButtonHeight),
         shape = ButtonShape,
         elevation = ButtonDefaults.buttonElevation(
             defaultElevation = 0.dp,
@@ -142,11 +149,15 @@ fun PrimaryActionButton(
     ) {
         if (loading) {
             CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier
+                    .size(size = 18.dp),
                 strokeWidth = 2.dp,
                 color = MaterialTheme.colorScheme.onPrimary
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(
+                modifier = Modifier
+                    .width(width = 8.dp)
+            )
         }
         Text(text = label, style = MaterialTheme.typography.labelLarge)
     }
@@ -164,7 +175,7 @@ fun SecondaryActionButton(
         enabled = enabled,
         modifier = modifier
             .fillMaxWidth()
-            .height(AppDimens.ButtonHeight),
+            .height(height = AppDimens.ButtonHeight),
         shape = ButtonShape
     ) {
         Text(text = label, style = MaterialTheme.typography.labelLarge)
@@ -183,10 +194,11 @@ fun CompactActionButton(
         Button(
             onClick = onClick,
             enabled = enabled,
-            modifier = modifier.height(AppDimens.CompactButtonHeight),
+            modifier = modifier
+                .height(height = AppDimens.CompactButtonHeight),
             shape = ButtonShape,
             elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp)
         ) {
             Text(text = label, style = MaterialTheme.typography.labelLarge)
         }
@@ -194,9 +206,10 @@ fun CompactActionButton(
         FilledTonalButton(
             onClick = onClick,
             enabled = enabled,
-            modifier = modifier.height(AppDimens.CompactButtonHeight),
+            modifier = modifier
+                .height(height = AppDimens.CompactButtonHeight),
             shape = ButtonShape,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp)
         ) {
             Text(text = label, style = MaterialTheme.typography.labelLarge)
         }
@@ -221,8 +234,8 @@ fun DeviceListItem(
                 ambientColor = AppColors.Shadow.copy(alpha = 0.03f),
                 spotColor = AppColors.Shadow.copy(alpha = 0.03f)
             )
-            .clip(CardShape)
-            .background(scheme.surfaceContainerLowest)
+            .clip(shape = CardShape)
+            .background(color = scheme.surfaceContainerLowest)
             .border(
                 width = 1.dp,
                 color = scheme.outlineVariant.copy(alpha = 0.65f),
@@ -230,23 +243,27 @@ fun DeviceListItem(
             )
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(space = 12.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(AppDimens.RadiusMd))
-                .background(scheme.primaryContainer),
+                .size(size = 42.dp)
+                .clip(shape = RoundedCornerShape(size = AppDimens.RadiusMd))
+                .background(color = scheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Outlined.Sensors,
                 contentDescription = null,
                 tint = scheme.onPrimaryContainer,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier
+                    .size(size = 20.dp)
             )
         }
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(weight = 1f)
+        ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall.copy(
@@ -257,7 +274,10 @@ fun DeviceListItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(AppDimens.TextLineGap))
+            Spacer(
+                modifier = Modifier
+                    .height(height = AppDimens.TextLineGap)
+            )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
@@ -265,7 +285,10 @@ fun DeviceListItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(
+                modifier = Modifier
+                    .height(height = 2.dp)
+            )
             Text(
                 text = rssiLabel(rssi = rssi),
                 style = MaterialTheme.typography.labelSmall,
@@ -296,19 +319,23 @@ fun EmptyState(
     ) {
         Box(
             modifier = Modifier
-                .size(64.dp)
-                .clip(RoundedCornerShape(AppDimens.RadiusLg))
-                .background(scheme.primaryContainer.copy(alpha = 0.7f)),
+                .size(size = 64.dp)
+                .clip(shape = RoundedCornerShape(size = AppDimens.RadiusLg))
+                .background(color = scheme.primaryContainer.copy(alpha = 0.7f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = scheme.primary,
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier
+                    .size(size = 28.dp)
             )
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(
+            modifier = Modifier
+                .height(height = 16.dp)
+        )
         Text(
             text = message,
             style = MaterialTheme.typography.bodyMedium,

@@ -11,6 +11,7 @@ import github.leavesczy.ambiq.ota.ota.OtaError
 import github.leavesczy.ambiq.ota.ota.OtaPhase
 import github.leavesczy.ambiq.ota.ota.OtaProgress
 import github.leavesczy.ambiq.ota.ota.OtaResult
+import github.leavesczy.ambiq.ota.ota.logText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -26,6 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * OTA 升级页：固件选择、直接驱动 GATT 会话、进度与耗时。
+ *
+ * 进度来自 [OtaClientListener.onProgress]；成败与取消以 [OtaResult] 为准。
  */
 class OtaViewModel(
     application: Application
@@ -49,9 +52,6 @@ class OtaViewModel(
                             phase = progress.phase,
                             progressPercent = progress.percent,
                             errorDetail = when (progress.phase) {
-                                OtaPhase.Failed, OtaPhase.Cancelled ->
-                                    progress.error?.message ?: state.errorDetail
-
                                 OtaPhase.Success -> null
                                 else -> state.errorDetail
                             }
@@ -68,7 +68,7 @@ class OtaViewModel(
         }
         viewModelScope.launch {
             try {
-                val cached = withContext(Dispatchers.IO) {
+                val cached = withContext(context = Dispatchers.IO) {
                     FirmwareStore.cacheFromUri(
                         context = getApplication(),
                         uri = uri
@@ -83,7 +83,7 @@ class OtaViewModel(
                         errorDetail = null,
                         isSucceeded = false,
                         phase = OtaPhase.Idle,
-                        progressPercent = 0,
+                        progressPercent = 0.0,
                         elapsedMs = 0L
                     )
                 }
@@ -120,7 +120,7 @@ class OtaViewModel(
             it.copy(
                 isRunning = true,
                 isSucceeded = false,
-                progressPercent = 0,
+                progressPercent = 0.0,
                 phase = OtaPhase.Preparing,
                 errorDetail = null,
                 statusMessage = "正在传输固件…",
@@ -143,7 +143,7 @@ class OtaViewModel(
                                 isRunning = false,
                                 isSucceeded = true,
                                 phase = OtaPhase.Success,
-                                progressPercent = 100,
+                                progressPercent = 100.0,
                                 statusMessage = "升级成功，设备即将重启",
                                 errorDetail = null
                             )
@@ -204,7 +204,7 @@ class OtaViewModel(
                 isSucceeded = false,
                 phase = if (cancelled) OtaPhase.Cancelled else OtaPhase.Failed,
                 statusMessage = if (cancelled) "升级已取消" else "升级失败",
-                errorDetail = error.message
+                errorDetail = error.logText()
             )
         }
     }
@@ -216,7 +216,7 @@ class OtaViewModel(
                 _uiState.update {
                     it.copy(elapsedMs = System.currentTimeMillis() - otaStartedAtMs)
                 }
-                delay(200)
+                delay(timeMillis = 200)
             }
         }
     }
